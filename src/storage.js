@@ -1,17 +1,20 @@
+const levelgraph = require('levelgraph');
+const leveljs = require('level-js');
+const levelup = require('levelup');
+const levelgraphJSONLD = require('levelgraph-jsonld');
+
 const PouchDB = require('pouchdb-browser');
-PouchDB.plugin(require('pouchdb-find'));
 
 const db = new PouchDB('page-notes');
 
-// create the target, log any output...just 'cause
-db
-  .createIndex({
-    index: {
-      fields: ['target']
-    }
-  })
-  .then(console.log.bind(console))
-  .catch(console.log.bind(console));
+const index = levelgraphJSONLD(
+  levelgraph(
+    levelup('page-notes-index', {
+      db: (location) => new leveljs(location)
+    })
+  )
+);
+window.index = index;
 
 // Promise returns a Web Annotation Container
 function getAllAnnotations() {
@@ -76,10 +79,37 @@ function storeAnnotation(annotation) {
   annotation._id = id;
   annotation.id = id;
 
-  console.log(JSON.stringify(annotation));
+  console.log('stored annotation', JSON.stringify(annotation));
 
-  return db.put(annotation);
+  return db.put(annotation)
+    .then((response) => {
+      console.log('stored?', response);
+      // now that the annotation is stored, let's index it
+      indexAnnotation(annotation);
+    });
 }
+
+function indexAnnotation(annotation) {
+  index.jsonld.put(annotation, (err, obj) => {
+    if (err) console.error('levelgraph-jsonld error', err);
+    console.log('indexed!', obj);
+  });
+}
+
+function reindexAllAnnotations() {
+  getAllAnnotations()
+    .then(function(rv) {
+      if ('items' in rv) {
+        console.log('indexing all the things!', rv.items.length);
+        rv.items.forEach(annotation => {
+          console.log('indexing', annotation);
+          indexAnnotation(annotation);
+        });
+      }
+    });
+}
+
+window.reindexAllAnnotations = reindexAllAnnotations;
 
 module.exports.getAllAnnotations = getAllAnnotations;
 module.exports.getAnnotations = getAnnotations;
